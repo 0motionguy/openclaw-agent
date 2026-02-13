@@ -40,16 +40,33 @@ npx openclaw-agent
 | Control native apps | Yes (AppleScript) | Partial (PowerShell) | No | Yes (DroidRun) |
 | Local AI (Ollama) | Yes | Yes | Yes | Via network |
 
-## Quick Start
+## Quick Start (macOS — recommended)
 
 ```bash
-# Interactive installer — detects your OS, asks what to install
+# 1. Run installer — selects Browser + AppleScript by default on Mac
 npx openclaw-agent
 
-# Just verify existing setup
+# 2. Grant AppleScript automation permission when prompted:
+#    System Settings → Privacy & Security → Automation → enable for Claude/Terminal
+
+# 3. Restart Claude Desktop, then ask:
+#    "Open example.com and read the headline"
+```
+
+## Other Environments
+
+| Environment | Layers | Notes |
+|------------|--------|-------|
+| **macOS** (primary) | Browser + AppleScript + Android | Full support, recommended |
+| **Linux VPS** | Browser only | Headless needs `xvfb-run` for Playwright |
+| **Android device** | DroidRun via Mac/Linux host | USB debugging + ADB required |
+| **Windows** | Browser + PowerShell | PowerShell helpers built-in |
+
+```bash
+# Verify existing setup
 npx openclaw-agent --verify
 
-# Just configure MCP
+# Re-configure MCP targets
 npx openclaw-agent --configure
 ```
 

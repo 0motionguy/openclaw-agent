@@ -60,6 +60,10 @@ export async function installOllama(platform) {
         spinner.warn('Could not start Ollama service automatically');
         console.log(chalk.yellow('You may need to run: ollama serve'));
       }
+
+      // Hint for persistent service on Linux VPS
+      console.log(chalk.dim('\n  For persistent service on a VPS:'));
+      console.log(chalk.dim('  sudo systemctl enable ollama && sudo systemctl start ollama\n'));
     } else {
       spinner.fail(`Unsupported platform: ${platform.osName}`);
       return false;

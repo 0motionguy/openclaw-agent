@@ -58,12 +58,12 @@ function buildLayerChoices(platform) {
     choices.push({
       name: 'macOS desktop control (AppleScript MCP)',
       value: 'macos',
-      checked: false
+      checked: true
     });
   }
 
   choices.push({
-    name: 'Android device control (DroidRun)',
+    name: 'Android device control (DroidRun) — requires USB-connected device with USB debugging',
     value: 'android',
     checked: false
   });

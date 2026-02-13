@@ -82,6 +82,9 @@ async function installMacOSTools(results) {
     execSync('npm install -g @peakmojo/applescript-mcp', { stdio: 'pipe' });
     spinner.succeed('Installed @peakmojo/applescript-mcp');
     results.macos.success = true;
+    console.log(chalk.yellow('\n  Note: AppleScript MCP needs Automation permission'));
+    console.log(chalk.dim('  System Settings → Privacy & Security → Automation'));
+    console.log(chalk.dim('  Enable for Claude Desktop and/or Terminal\n'));
   } catch (error) {
     spinner.fail('Failed to install @peakmojo/applescript-mcp');
     results.macos.error = error.message;
@@ -95,6 +98,19 @@ async function installMacOSTools(results) {
  * @param {object} results - Results object to update
  */
 async function installAndroidTools(platform, results) {
+  // Check for ADB first
+  if (!platform.hasAdb) {
+    console.log(chalk.yellow('  Note: ADB not found — needed to connect to Android devices'));
+    if (platform.os === 'darwin') {
+      console.log(chalk.dim('  Install: brew install android-platform-tools'));
+    } else if (platform.os === 'linux') {
+      console.log(chalk.dim('  Install: sudo apt install adb'));
+    } else {
+      console.log(chalk.dim('  Install: choco install adb  (or download from developer.android.com)'));
+    }
+    console.log('');
+  }
+
   if (!platform.hasPython) {
     console.log(chalk.red('✗ Python not found - required for DroidRun'));
     results.android.error = 'Python not installed';
@@ -109,7 +125,7 @@ async function installAndroidTools(platform, results) {
 
   const spinner = ora('Installing droidrun via pip...').start();
   try {
-    const pipCmd = platform.hasPip && execSync('which pip3', { encoding: 'utf8', stdio: 'pipe' }).trim() ? 'pip3' : 'pip';
+    const pipCmd = platform.os !== 'win32' ? 'pip3' : 'pip';
     execSync(`${pipCmd} install droidrun`, { stdio: 'pipe' });
     spinner.succeed('Installed droidrun');
     results.android.success = true;

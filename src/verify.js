@@ -16,6 +16,13 @@ export async function runVerification(platform, layers) {
   // Test 1: Ollama
   await testOllama(results);
 
+  // Headless display check for Linux VPS
+  if (layers.browser && process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+    console.log(chalk.yellow('  ⚠ No display server detected (headless VPS)'));
+    console.log(chalk.dim('  Playwright needs Xvfb for browser automation:'));
+    console.log(chalk.dim('  sudo apt install xvfb && xvfb-run npx playwright test\n'));
+  }
+
   // Test 2: agent-browser
   if (layers.browser) {
     await testAgentBrowser(results);
