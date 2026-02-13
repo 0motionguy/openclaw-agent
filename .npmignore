@@ -1,0 +1,14 @@
+.git
+.github
+.gitignore
+node_modules
+test/
+coverage/
+*.test.js
+*.spec.js
+eslint.config.js
+.prettierrc
+vitest.config.js
+CONTRIBUTING.md
+.DS_Store
+Thumbs.db

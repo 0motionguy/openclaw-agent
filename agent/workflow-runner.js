@@ -83,69 +83,12 @@ export class WorkflowRunner {
 
         console.log(`\n[Step ${stepNumber}/${workflow.steps.length}] ${step.name || 'Unnamed step'}`);
 
-        // Resolve templates in step parameters
-        const resolvedStep = this.resolveTemplates(step);
-
-        // Execute the step
-        try {
-          const result = await executor(
-            resolvedStep.tool,
-            resolvedStep.action,
-            resolvedStep.params || {}
-          );
-
-          // Store result
-          const stepResult = {
-            stepNumber,
-            name: step.name,
-            tool: resolvedStep.tool,
-            action: resolvedStep.action,
-            result,
-            success: true,
-            timestamp: new Date().toISOString()
-          };
-          this.stepResults.push(stepResult);
-
-          // Store result in variables if ref is specified
-          if (step.ref) {
-            this.variables[step.ref] = result;
-          }
-
-          // Store last value for easy access
-          this.variables.last_value = result;
-          this.variables.last_step = stepNumber;
-
-          // Extract facts if specified
-          if (step.extractFacts && Array.isArray(step.extractFacts)) {
-            const facts = step.extractFacts.map(factTemplate =>
-              this._resolveString(factTemplate, this.variables)
-            );
-            this.context.extractFacts(result, facts);
-          }
-
-          console.log(`  ✓ Success`);
-
-        } catch (error) {
-          console.error(`  ✗ Failed: ${error.message}`);
-
-          // Store error result
-          const stepResult = {
-            stepNumber,
-            name: step.name,
-            tool: resolvedStep.tool,
-            action: resolvedStep.action,
-            error: error.message,
-            success: false,
-            timestamp: new Date().toISOString()
-          };
-          this.stepResults.push(stepResult);
-
-          // If step is not optional, fail workflow
-          if (!step.optional) {
-            throw new Error(`Step ${stepNumber} failed: ${error.message}`);
-          }
-
-          console.log(`  ⚠ Step marked as optional, continuing...`);
+        // Check if this is a parallel step group
+        if (step.parallel && Array.isArray(step.parallel)) {
+          await this._executeParallelStep(step, stepNumber, executor);
+        } else {
+          // Execute single step with retry support
+          await this._executeSingleStep(step, stepNumber, executor);
         }
 
         // Check context budget
@@ -242,6 +185,183 @@ export class WorkflowRunner {
       // Return original if not found
       return match;
     });
+  }
+
+  /**
+   * Execute a single step with retry support
+   * @private
+   * @param {Object} step - Step configuration
+   * @param {number} stepNumber - Step number
+   * @param {Function} executor - Executor function
+   */
+  async _executeSingleStep(step, stepNumber, executor) {
+    const maxRetries = step.retry?.max || 0;
+    const backoffMs = step.retry?.backoffMs || 1000;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        console.log(`  ⟳ Retry attempt ${attempt}/${maxRetries} (waiting ${backoffMs}ms)...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+      }
+
+      const startTime = Date.now();
+
+      try {
+        // Resolve templates in step parameters
+        const resolvedStep = this.resolveTemplates(step);
+
+        // Execute the step
+        const result = await executor(
+          resolvedStep.tool,
+          resolvedStep.action,
+          resolvedStep.params || {}
+        );
+
+        const duration = Date.now() - startTime;
+
+        // Store result
+        const stepResult = {
+          stepNumber,
+          name: step.name,
+          tool: resolvedStep.tool,
+          action: resolvedStep.action,
+          result,
+          success: true,
+          timestamp: new Date().toISOString(),
+          startTime,
+          duration
+        };
+        this.stepResults.push(stepResult);
+
+        // Store result in variables if ref is specified
+        if (step.ref) {
+          this.variables[step.ref] = result;
+        }
+
+        // Store last value for easy access
+        this.variables.last_value = result;
+        this.variables.last_step = stepNumber;
+
+        // Extract facts if specified
+        if (step.extractFacts && Array.isArray(step.extractFacts)) {
+          const facts = step.extractFacts.map(factTemplate =>
+            this._resolveString(factTemplate, this.variables)
+          );
+          const priority = step.factPriority || 'normal';
+          this.context.extractFacts(result, facts, priority);
+        }
+
+        console.log(`  ✓ Success (${duration}ms)`);
+        return; // Success, exit retry loop
+
+      } catch (error) {
+        if (attempt === maxRetries) {
+          // Last attempt failed
+          const duration = Date.now() - startTime;
+          console.error(`  ✗ Failed after ${maxRetries + 1} attempts: ${error.message}`);
+
+          // Store error result
+          const stepResult = {
+            stepNumber,
+            name: step.name,
+            tool: step.tool,
+            action: step.action,
+            error: error.message,
+            success: false,
+            timestamp: new Date().toISOString(),
+            startTime,
+            duration,
+            attempts: maxRetries + 1
+          };
+          this.stepResults.push(stepResult);
+
+          // If step is not optional, fail workflow
+          if (!step.optional) {
+            throw new Error(`Step ${stepNumber} failed: ${error.message}`);
+          }
+
+          console.log(`  ⚠ Step marked as optional, continuing...`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Execute parallel substeps
+   * @private
+   * @param {Object} step - Step configuration with parallel array
+   * @param {number} stepNumber - Step number
+   * @param {Function} executor - Executor function
+   */
+  async _executeParallelStep(step, stepNumber, executor) {
+    console.log(`  Running ${step.parallel.length} parallel substeps...`);
+    const startTime = Date.now();
+
+    // Execute all parallel substeps
+    const results = await Promise.allSettled(
+      step.parallel.map(async (substep, index) => {
+        const resolved = this.resolveTemplates(substep);
+        try {
+          const result = await executor(resolved.tool, resolved.action, resolved.params || {});
+          console.log(`  ✓ Substep ${index + 1}/${step.parallel.length} success`);
+          return { substep, result, success: true };
+        } catch (error) {
+          console.error(`  ✗ Substep ${index + 1}/${step.parallel.length} failed: ${error.message}`);
+          return { substep, error, success: false };
+        }
+      })
+    );
+
+    const duration = Date.now() - startTime;
+
+    // Process results
+    const successes = [];
+    const failures = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const settled = results[i];
+      if (settled.status === 'fulfilled') {
+        const { substep, result, success, error } = settled.value;
+
+        if (success) {
+          successes.push({ substep, result });
+          // Store result if ref is specified
+          if (substep.ref) {
+            this.variables[substep.ref] = result;
+          }
+        } else {
+          failures.push({ substep, error });
+        }
+      } else {
+        // Promise rejected
+        failures.push({ substep: step.parallel[i], error: settled.reason });
+      }
+    }
+
+    // Store combined result
+    const stepResult = {
+      stepNumber,
+      name: step.name,
+      type: 'parallel',
+      successes: successes.length,
+      failures: failures.length,
+      results: successes,
+      errors: failures,
+      success: failures.length === 0,
+      timestamp: new Date().toISOString(),
+      startTime,
+      duration
+    };
+    this.stepResults.push(stepResult);
+
+    // Check if any non-optional substeps failed
+    const hasRequiredFailure = failures.some(f => !f.substep.optional);
+
+    if (hasRequiredFailure && !step.optional) {
+      const errorMessages = failures.map(f => f.error?.message || f.error).join(', ');
+      throw new Error(`Parallel step ${stepNumber} had required substep failures: ${errorMessages}`);
+    }
+
+    console.log(`  ✓ Parallel group completed: ${successes.length}/${step.parallel.length} succeeded (${duration}ms)`);
   }
 
   /**

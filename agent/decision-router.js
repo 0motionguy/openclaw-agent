@@ -59,103 +59,259 @@ export class DecisionRouter {
         'compress', 'extract', 'path', 'mkdir', 'rm', 'ls', 'cd'
       ]
     };
+
+    // Precompile regex patterns for performance
+    this.compiledPatterns = new Map();
+    for (const [category, keywords] of Object.entries(this.patterns)) {
+      const regexes = keywords.map(pattern =>
+        new RegExp(`\\b${this._escapeRegex(pattern)}\\b`, 'i')
+      );
+      this.compiledPatterns.set(category, {
+        keywords: keywords,
+        regexes: regexes
+      });
+    }
+
+    // LRU cache for routing decisions (max 100 entries)
+    this.cache = new Map();
+    this.cacheMaxSize = 100;
+
+    // Category priority for conflict resolution
+    this.categoryPriority = ['api', 'browser', 'macos', 'android', 'windows', 'file'];
   }
 
   /**
-   * Route task to appropriate tool/layer
+   * Route task to appropriate tool/layer with confidence scoring and caching
    * @param {string} taskDescription - Description of the task
-   * @returns {Object|null} Route decision with layer, tool, fallback, and reason
+   * @returns {Object|null} Route decision with layer, tool, fallback, reason, confidence, and alternatives
    */
   route(taskDescription) {
     const task = taskDescription.toLowerCase();
 
-    // Step 1: Check for API tasks
-    if (this._matchesPattern(task, this.patterns.api)) {
-      return {
-        layer: 'api',
-        tool: 'http-request',
-        fallback: null,
-        reason: 'Detected API/HTTP request keywords'
-      };
+    // Check cache first
+    const cacheKey = this._hashString(task);
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey);
     }
 
-    // Step 2: Check for browser tasks
-    if (this._matchesPattern(task, this.patterns.browser)) {
-      const hasBrowserLayer = this.platform.layers?.includes('agent-browser') ||
-                              this.platform.layers?.includes('playwright');
-      return {
-        layer: 'browser',
-        tool: 'agent-browser',
-        fallback: 'playwright',
-        reason: 'Detected web browsing keywords',
-        available: hasBrowserLayer
-      };
+    // Score all categories
+    const scores = [];
+    for (const category of this.categoryPriority) {
+      const matchCount = this._matchesPattern(task, category);
+      if (matchCount > 0) {
+        const compiled = this.compiledPatterns.get(category);
+        const confidence = matchCount / compiled.keywords.length;
+        scores.push({ category, matchCount, confidence });
+
+        // Early exit if > 80% match
+        if (confidence > 0.8) {
+          break;
+        }
+      }
     }
 
-    // Step 3: Check for macOS native tasks (only on Darwin)
-    if (this.platform.os === 'darwin' && this._matchesPattern(task, this.patterns.macos)) {
-      const hasAppleScript = this.platform.layers?.includes('applescript');
-      return {
-        layer: 'native',
-        tool: 'applescript',
-        fallback: 'bash',
-        reason: 'Detected macOS native app keywords',
-        available: hasAppleScript
-      };
+    // No matches found
+    if (scores.length === 0) {
+      this._addToCache(cacheKey, null);
+      return null;
     }
 
-    // Step 4: Check for Android tasks
-    if (this._matchesPattern(task, this.patterns.android)) {
-      const hasDroidRun = this.platform.layers?.includes('droidrun');
-      return {
-        layer: 'mobile',
-        tool: 'droidrun',
-        fallback: null,
-        reason: 'Detected Android/mobile keywords',
-        available: hasDroidRun
-      };
+    // Sort by confidence (highest first)
+    scores.sort((a, b) => b.confidence - a.confidence);
+
+    // Build result based on highest scoring category
+    const topScore = scores[0];
+    const alternatives = scores.slice(1).map(s => ({
+      category: s.category,
+      confidence: s.confidence
+    }));
+
+    let result = null;
+
+    switch (topScore.category) {
+      case 'api':
+        result = {
+          layer: 'api',
+          tool: 'http-request',
+          fallback: null,
+          reason: 'Detected API/HTTP request keywords',
+          confidence: topScore.confidence,
+          alternatives,
+          available: true
+        };
+        break;
+
+      case 'browser': {
+        const hasBrowserLayer = this.platform.layers?.includes('agent-browser') ||
+                                this.platform.layers?.includes('playwright');
+        result = {
+          layer: 'browser',
+          tool: 'agent-browser',
+          fallback: 'playwright',
+          reason: 'Detected web browsing keywords',
+          confidence: topScore.confidence,
+          alternatives,
+          available: hasBrowserLayer
+        };
+        break;
+      }
+
+      case 'macos':
+        if (this.platform.os === 'darwin') {
+          const hasAppleScript = this.platform.layers?.includes('applescript');
+          result = {
+            layer: 'native',
+            tool: 'applescript',
+            fallback: 'bash',
+            reason: 'Detected macOS native app keywords',
+            confidence: topScore.confidence,
+            alternatives,
+            available: hasAppleScript
+          };
+        } else {
+          // macOS keywords but not on macOS - try next best
+          result = scores.length > 1 ? this._buildResultForCategory(scores[1], alternatives.slice(1)) : null;
+        }
+        break;
+
+      case 'android': {
+        const hasDroidRun = this.platform.layers?.includes('droidrun');
+        result = {
+          layer: 'mobile',
+          tool: 'droidrun',
+          fallback: null,
+          reason: 'Detected Android/mobile keywords',
+          confidence: topScore.confidence,
+          alternatives,
+          available: hasDroidRun
+        };
+        break;
+      }
+
+      case 'windows':
+        if (this.platform.os === 'win32') {
+          const hasPowerShell = this.platform.layers?.includes('powershell');
+          result = {
+            layer: 'native',
+            tool: 'powershell',
+            fallback: 'bash',
+            reason: 'Detected Windows native keywords',
+            confidence: topScore.confidence,
+            alternatives,
+            available: hasPowerShell
+          };
+        } else {
+          // Windows keywords but not on Windows - try next best
+          result = scores.length > 1 ? this._buildResultForCategory(scores[1], alternatives.slice(1)) : null;
+        }
+        break;
+
+      case 'file': {
+        const tool = this.platform.os === 'win32' ? 'powershell' : 'bash';
+        result = {
+          layer: 'system',
+          tool: tool,
+          fallback: null,
+          reason: 'Detected file/system operation keywords',
+          confidence: topScore.confidence,
+          alternatives,
+          available: true
+        };
+        break;
+      }
+
+      default:
+        result = null;
     }
 
-    // Step 5: Check for Windows native tasks (only on Windows)
-    if (this.platform.os === 'win32' && this._matchesPattern(task, this.patterns.windows)) {
-      const hasPowerShell = this.platform.layers?.includes('powershell');
-      return {
-        layer: 'native',
-        tool: 'powershell',
-        fallback: 'bash',
-        reason: 'Detected Windows native keywords',
-        available: hasPowerShell
-      };
-    }
+    // Add to cache
+    this._addToCache(cacheKey, result);
 
-    // Step 6: Check for file/system tasks
-    if (this._matchesPattern(task, this.patterns.file)) {
-      const tool = this.platform.os === 'win32' ? 'powershell' : 'bash';
-      return {
-        layer: 'system',
-        tool: tool,
-        fallback: null,
-        reason: 'Detected file/system operation keywords'
-      };
-    }
-
-    // Step 7: Unknown task type
-    return null;
+    return result;
   }
 
   /**
-   * Check if task matches any keyword in pattern list
+   * Build result object for a given category score
+   * @private
+   */
+  _buildResultForCategory(score, alternatives) {
+    switch (score.category) {
+      case 'api':
+        return {
+          layer: 'api',
+          tool: 'http-request',
+          fallback: null,
+          reason: 'Detected API/HTTP request keywords',
+          confidence: score.confidence,
+          alternatives,
+          available: true
+        };
+      case 'file': {
+        const tool = this.platform.os === 'win32' ? 'powershell' : 'bash';
+        return {
+          layer: 'system',
+          tool: tool,
+          fallback: null,
+          reason: 'Detected file/system operation keywords',
+          confidence: score.confidence,
+          alternatives,
+          available: true
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Check if task matches any keyword in pattern list using precompiled regexes
    * @private
    * @param {string} task - Lowercase task description
-   * @param {Array<string>} patterns - Array of keywords to match
-   * @returns {boolean} True if any pattern matches
+   * @param {string} category - Category name (uses precompiled patterns)
+   * @returns {number} Number of matched keywords
    */
-  _matchesPattern(task, patterns) {
-    return patterns.some(pattern => {
-      // Check for whole word matches or phrases
-      const regex = new RegExp(`\\b${this._escapeRegex(pattern)}\\b`, 'i');
-      return regex.test(task);
-    });
+  _matchesPattern(task, category) {
+    const compiled = this.compiledPatterns.get(category);
+    if (!compiled) return 0;
+
+    let matchCount = 0;
+    for (const regex of compiled.regexes) {
+      if (regex.test(task)) {
+        matchCount++;
+      }
+    }
+    return matchCount;
+  }
+
+  /**
+   * Simple string hash for cache keys
+   * @private
+   * @param {string} str - String to hash
+   * @returns {string} Hash string
+   */
+  _hashString(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(36);
+  }
+
+  /**
+   * Add result to LRU cache
+   * @private
+   * @param {string} key - Cache key
+   * @param {any} value - Value to cache
+   */
+  _addToCache(key, value) {
+    // Remove oldest entry if cache is full
+    if (this.cache.size >= this.cacheMaxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
   }
 
   /**
@@ -177,7 +333,7 @@ export class DecisionRouter {
   }
 
   /**
-   * Add custom pattern keywords
+   * Add custom pattern keywords and recompile regexes
    * @param {string} category - Pattern category (api, browser, etc.)
    * @param {Array<string>} keywords - Keywords to add
    */
@@ -186,6 +342,18 @@ export class DecisionRouter {
       this.patterns[category] = [];
     }
     this.patterns[category].push(...keywords);
+
+    // Recompile patterns for this category
+    const regexes = this.patterns[category].map(pattern =>
+      new RegExp(`\\b${this._escapeRegex(pattern)}\\b`, 'i')
+    );
+    this.compiledPatterns.set(category, {
+      keywords: this.patterns[category],
+      regexes: regexes
+    });
+
+    // Clear cache since patterns changed
+    this.cache.clear();
   }
 
   /**
@@ -197,11 +365,14 @@ export class DecisionRouter {
     const task = taskDescription.toLowerCase();
     const matches = {};
 
-    for (const [category, patterns] of Object.entries(this.patterns)) {
-      const matchedKeywords = patterns.filter(pattern => {
-        const regex = new RegExp(`\\b${this._escapeRegex(pattern)}\\b`, 'i');
-        return regex.test(task);
-      });
+    // Use precompiled patterns for analysis
+    for (const [category, compiled] of this.compiledPatterns.entries()) {
+      const matchedKeywords = [];
+      for (let i = 0; i < compiled.regexes.length; i++) {
+        if (compiled.regexes[i].test(task)) {
+          matchedKeywords.push(compiled.keywords[i]);
+        }
+      }
 
       if (matchedKeywords.length > 0) {
         matches[category] = matchedKeywords;

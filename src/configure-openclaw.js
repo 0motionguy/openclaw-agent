@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
+import { validatePlatform, validateLayers } from './validate.js';
 
 /**
  * Generates and writes openclaw.config.json
@@ -11,6 +12,8 @@ import ora from 'ora';
  * @returns {Promise<object>} Configuration results
  */
 export async function configureOpenclaw(platform, layers, models) {
+  validatePlatform(platform);
+  validateLayers(layers);
   const spinner = ora('Generating openclaw.config.json...').start();
 
   try {

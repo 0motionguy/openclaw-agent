@@ -1,6 +1,7 @@
-import { execSync, spawn } from 'child_process';
+import { execSync, execFileSync, spawn } from 'child_process';
 import chalk from 'chalk';
 import ora from 'ora';
+import { validatePlatform, validateModelName } from './validate.js';
 
 /**
  * Installs Ollama on the current platform
@@ -8,6 +9,7 @@ import ora from 'ora';
  * @returns {Promise<boolean>} Success status
  */
 export async function installOllama(platform) {
+  validatePlatform(platform);
   const spinner = ora('Installing Ollama...').start();
 
   try {
@@ -23,7 +25,7 @@ export async function installOllama(platform) {
           spinner.start('Starting Ollama service...');
           execSync('brew services start ollama', { stdio: 'ignore' });
           spinner.succeed('Ollama service started');
-        } catch (err) {
+        } catch {
           spinner.warn('Could not start Ollama service automatically');
           console.log(chalk.yellow('You may need to start Ollama manually'));
         }
@@ -56,7 +58,7 @@ export async function installOllama(platform) {
         });
         ollamaProcess.unref();
         spinner.succeed('Ollama service started in background');
-      } catch (err) {
+      } catch {
         spinner.warn('Could not start Ollama service automatically');
         console.log(chalk.yellow('You may need to run: ollama serve'));
       }
@@ -90,7 +92,8 @@ export async function pullModels(models) {
   for (const model of models) {
     const spinner = ora(`Pulling model: ${model}`).start();
     try {
-      execSync(`ollama pull ${model}`, { stdio: 'inherit' });
+      validateModelName(model);
+      execFileSync('ollama', ['pull', model], { stdio: 'inherit' });
       spinner.succeed(`Pulled model: ${model}`);
       pulledModels.push(model);
     } catch (error) {

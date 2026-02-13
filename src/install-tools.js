@@ -1,6 +1,7 @@
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import chalk from 'chalk';
 import ora from 'ora';
+import { validatePlatform, validateLayers } from './validate.js';
 
 /**
  * Installs required tools based on selected layers
@@ -9,6 +10,8 @@ import ora from 'ora';
  * @returns {Promise<object>} Installation results
  */
 export async function installTools(platform, layers) {
+  validatePlatform(platform);
+  validateLayers(layers);
   const results = {
     browser: { success: false, error: null },
     macos: { success: false, error: null },
@@ -49,26 +52,43 @@ export async function installTools(platform, layers) {
  * @param {object} results - Results object to update
  */
 async function installBrowserTools(results) {
-  let spinner = ora('Installing @anthropic-ai/agent-browser...').start();
+  // Check if agent-browser is already installed
+  let spinner = ora('Checking @anthropic-ai/agent-browser...').start();
   try {
-    execSync('npm install -g @anthropic-ai/agent-browser', { stdio: 'pipe' });
-    spinner.succeed('Installed @anthropic-ai/agent-browser');
-  } catch (error) {
-    spinner.fail('Failed to install @anthropic-ai/agent-browser');
-    results.browser.error = error.message;
-    console.error(chalk.red(error.message));
-    return;
+    execSync('npm list -g @anthropic-ai/agent-browser', { stdio: 'pipe' });
+    spinner.succeed('@anthropic-ai/agent-browser already installed');
+  } catch {
+    // Not installed, proceed with installation
+    spinner.text = 'Installing @anthropic-ai/agent-browser...';
+    try {
+      execSync('npm install -g @anthropic-ai/agent-browser', { stdio: 'pipe' });
+      spinner.succeed('Installed @anthropic-ai/agent-browser');
+    } catch (error) {
+      spinner.fail('Failed to install @anthropic-ai/agent-browser');
+      results.browser.error = error.message;
+      console.error(chalk.red(error.message));
+      return;
+    }
   }
 
-  spinner = ora('Installing Playwright Chromium...').start();
+  // Check if Playwright is already installed
+  spinner = ora('Checking Playwright...').start();
   try {
-    execSync('npx playwright install chromium', { stdio: 'pipe' });
-    spinner.succeed('Installed Playwright Chromium');
+    execSync('npx playwright --version', { stdio: 'pipe' });
+    spinner.succeed('Playwright already installed');
     results.browser.success = true;
-  } catch (error) {
-    spinner.fail('Failed to install Playwright Chromium');
-    results.browser.error = error.message;
-    console.error(chalk.red(error.message));
+  } catch {
+    // Not installed, proceed with installation
+    spinner.text = 'Installing Playwright Chromium...';
+    try {
+      execSync('npx playwright install chromium', { stdio: 'pipe' });
+      spinner.succeed('Installed Playwright Chromium');
+      results.browser.success = true;
+    } catch (error) {
+      spinner.fail('Failed to install Playwright Chromium');
+      results.browser.error = error.message;
+      console.error(chalk.red(error.message));
+    }
   }
 }
 
@@ -77,18 +97,29 @@ async function installBrowserTools(results) {
  * @param {object} results - Results object to update
  */
 async function installMacOSTools(results) {
-  const spinner = ora('Installing @peakmojo/applescript-mcp...').start();
+  const spinner = ora('Checking @peakmojo/applescript-mcp...').start();
   try {
-    execSync('npm install -g @peakmojo/applescript-mcp', { stdio: 'pipe' });
-    spinner.succeed('Installed @peakmojo/applescript-mcp');
+    execSync('npm list -g @peakmojo/applescript-mcp', { stdio: 'pipe' });
+    spinner.succeed('@peakmojo/applescript-mcp already installed');
     results.macos.success = true;
     console.log(chalk.yellow('\n  Note: AppleScript MCP needs Automation permission'));
     console.log(chalk.dim('  System Settings → Privacy & Security → Automation'));
     console.log(chalk.dim('  Enable for Claude Desktop and/or Terminal\n'));
-  } catch (error) {
-    spinner.fail('Failed to install @peakmojo/applescript-mcp');
-    results.macos.error = error.message;
-    console.error(chalk.red(error.message));
+  } catch {
+    // Not installed, proceed with installation
+    spinner.text = 'Installing @peakmojo/applescript-mcp...';
+    try {
+      execSync('npm install -g @peakmojo/applescript-mcp', { stdio: 'pipe' });
+      spinner.succeed('Installed @peakmojo/applescript-mcp');
+      results.macos.success = true;
+      console.log(chalk.yellow('\n  Note: AppleScript MCP needs Automation permission'));
+      console.log(chalk.dim('  System Settings → Privacy & Security → Automation'));
+      console.log(chalk.dim('  Enable for Claude Desktop and/or Terminal\n'));
+    } catch (error) {
+      spinner.fail('Failed to install @peakmojo/applescript-mcp');
+      results.macos.error = error.message;
+      console.error(chalk.red(error.message));
+    }
   }
 }
 
@@ -126,7 +157,7 @@ async function installAndroidTools(platform, results) {
   const spinner = ora('Installing droidrun via pip...').start();
   try {
     const pipCmd = platform.os !== 'win32' ? 'pip3' : 'pip';
-    execSync(`${pipCmd} install droidrun`, { stdio: 'pipe' });
+    execFileSync(pipCmd, ['install', 'droidrun'], { stdio: 'pipe' });
     spinner.succeed('Installed droidrun');
     results.android.success = true;
   } catch (error) {

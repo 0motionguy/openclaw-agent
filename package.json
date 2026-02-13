@@ -6,10 +6,32 @@
   "bin": {
     "openclaw-setup": "./bin/cli.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "agent/",
+    "config/",
+    "prompts/",
+    "workflows/",
+    "docs/",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0motionguy/openclaw-agent.git"
+  },
+  "homepage": "https://github.com/0motionguy/openclaw-agent#readme",
+  "bugs": {
+    "url": "https://github.com/0motionguy/openclaw-agent/issues"
+  },
   "scripts": {
     "setup": "node bin/cli.js",
     "verify": "node bin/cli.js --verify",
-    "configure": "node bin/cli.js --configure"
+    "configure": "node bin/cli.js --configure",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ bin/ agent/"
   },
   "keywords": [
     "ai-agent",
@@ -27,6 +49,10 @@
     "chalk": "^5.3.0",
     "inquirer": "^9.2.12",
     "ora": "^7.0.1"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0",
+    "eslint": "^9.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

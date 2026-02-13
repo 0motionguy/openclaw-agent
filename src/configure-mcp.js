@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import chalk from 'chalk';
 import ora from 'ora';
+import { validatePlatform, validateTarget, validateLayers } from './validate.js';
 
 /**
  * Gets the Claude Desktop config path for the current platform
@@ -28,6 +29,9 @@ function getClaudeDesktopConfigPath(platform) {
  * @returns {Promise<object>} Configuration results
  */
 export async function configureMcp(platform, target, layers) {
+  validatePlatform(platform);
+  validateTarget(target);
+  validateLayers(layers);
   const results = {
     desktop: { success: false, error: null, path: null },
     code: { success: false, error: null, commands: [] }
@@ -113,8 +117,10 @@ async function configureClaudeDesktop(platform, mcpServers, results) {
       }
     }
 
-    // Write updated config
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    // Write updated config atomically
+    const tmpPath = configPath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), 'utf8');
+    fs.renameSync(tmpPath, configPath);
 
     spinner.succeed(`Configured Claude Desktop (${addedCount} servers added)`);
     console.log(chalk.gray(`  Config: ${configPath}`));

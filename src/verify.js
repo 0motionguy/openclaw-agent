@@ -1,20 +1,18 @@
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import ora from 'ora';
+import { validatePlatform, validateLayers } from './validate.js';
 
 /**
- * Runs verification tests for installed components
+ * Runs verification tests for installed components (parallel execution)
  * @param {object} platform - Platform detection object
  * @param {object} layers - Selected layers
  * @returns {Promise<object>} Verification results
  */
 export async function runVerification(platform, layers) {
+  validatePlatform(platform);
+  validateLayers(layers);
   console.log(chalk.cyan('\n🔍 Running verification tests...\n'));
-
-  const results = [];
-
-  // Test 1: Ollama
-  await testOllama(results);
 
   // Headless display check for Linux VPS
   if (layers.browser && process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
@@ -23,25 +21,35 @@ export async function runVerification(platform, layers) {
     console.log(chalk.dim('  sudo apt install xvfb && xvfb-run npx playwright test\n'));
   }
 
-  // Test 2: agent-browser
+  // Build list of tests to run in parallel
+  const tests = [];
+
+  // Always test Ollama
+  tests.push(testOllama());
+
+  // Browser tests
   if (layers.browser) {
-    await testAgentBrowser(results);
+    tests.push(testAgentBrowser());
+    tests.push(testPlaywright());
   }
 
-  // Test 3: Playwright
-  if (layers.browser) {
-    await testPlaywright(results);
-  }
-
-  // Test 4: AppleScript MCP (macOS only)
+  // macOS test
   if (layers.macos && platform.os === 'darwin') {
-    await testAppleScript(results);
+    tests.push(testAppleScript());
   }
 
-  // Test 5: DroidRun (if Android layer enabled)
+  // Android test
   if (layers.android) {
-    await testDroidRun(results);
+    tests.push(testDroidRun());
   }
+
+  // Run all tests in parallel
+  const settledResults = await Promise.allSettled(tests);
+
+  // Collect results
+  const results = settledResults
+    .filter(r => r.status === 'fulfilled')
+    .map(r => r.value);
 
   // Print summary table
   printSummary(results);
@@ -54,30 +62,30 @@ export async function runVerification(platform, layers) {
 
 /**
  * Tests if Ollama is running and accessible
- * @param {Array} results - Results array to append to
+ * @returns {Promise<Object>} Test result
  */
-async function testOllama(results) {
+async function testOllama() {
   const spinner = ora('Testing Ollama...').start();
   try {
-    const response = await fetch('http://localhost:11434/api/tags');
+    const response = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(5000) });
     if (response.ok) {
       spinner.succeed('Ollama: Running');
-      results.push({ name: 'Ollama', passed: true, details: 'API responding' });
+      return { name: 'Ollama', passed: true, details: 'API responding' };
     } else {
       spinner.fail('Ollama: Not responding');
-      results.push({ name: 'Ollama', passed: false, details: `HTTP ${response.status}` });
+      return { name: 'Ollama', passed: false, details: `HTTP ${response.status}` };
     }
   } catch (error) {
     spinner.fail('Ollama: Not accessible');
-    results.push({ name: 'Ollama', passed: false, details: error.message });
+    return { name: 'Ollama', passed: false, details: error.message };
   }
 }
 
 /**
  * Tests if agent-browser is installed
- * @param {Array} results - Results array to append to
+ * @returns {Promise<Object>} Test result
  */
-async function testAgentBrowser(results) {
+async function testAgentBrowser() {
   const spinner = ora('Testing agent-browser...').start();
   try {
     // Try to run the package - it should be globally installed
@@ -86,8 +94,8 @@ async function testAgentBrowser(results) {
       encoding: 'utf8'
     });
     spinner.succeed('agent-browser: Installed');
-    results.push({ name: 'agent-browser', passed: true, details: 'Package available' });
-  } catch (error) {
+    return { name: 'agent-browser', passed: true, details: 'Package available' };
+  } catch {
     // Check if globally installed
     try {
       execSync('npm list -g @anthropic-ai/agent-browser', {
@@ -95,19 +103,19 @@ async function testAgentBrowser(results) {
         encoding: 'utf8'
       });
       spinner.succeed('agent-browser: Installed (global)');
-      results.push({ name: 'agent-browser', passed: true, details: 'Globally installed' });
+      return { name: 'agent-browser', passed: true, details: 'Globally installed' };
     } catch {
       spinner.fail('agent-browser: Not found');
-      results.push({ name: 'agent-browser', passed: false, details: 'Not installed' });
+      return { name: 'agent-browser', passed: false, details: 'Not installed' };
     }
   }
 }
 
 /**
  * Tests if Playwright is installed
- * @param {Array} results - Results array to append to
+ * @returns {Promise<Object>} Test result
  */
-async function testPlaywright(results) {
+async function testPlaywright() {
   const spinner = ora('Testing Playwright...').start();
   try {
     const output = execSync('npx playwright --version', {
@@ -116,18 +124,18 @@ async function testPlaywright(results) {
     });
     const version = output.trim();
     spinner.succeed('Playwright: Installed');
-    results.push({ name: 'Playwright', passed: true, details: version });
-  } catch (error) {
+    return { name: 'Playwright', passed: true, details: version };
+  } catch {
     spinner.fail('Playwright: Not found');
-    results.push({ name: 'Playwright', passed: false, details: 'Not installed' });
+    return { name: 'Playwright', passed: false, details: 'Not installed' };
   }
 }
 
 /**
  * Tests if AppleScript MCP is installed (macOS only)
- * @param {Array} results - Results array to append to
+ * @returns {Promise<Object>} Test result
  */
-async function testAppleScript(results) {
+async function testAppleScript() {
   const spinner = ora('Testing AppleScript MCP...').start();
   try {
     execSync('npm list -g @peakmojo/applescript-mcp', {
@@ -135,18 +143,18 @@ async function testAppleScript(results) {
       encoding: 'utf8'
     });
     spinner.succeed('AppleScript MCP: Installed');
-    results.push({ name: 'AppleScript MCP', passed: true, details: 'Globally installed' });
-  } catch (error) {
+    return { name: 'AppleScript MCP', passed: true, details: 'Globally installed' };
+  } catch {
     spinner.fail('AppleScript MCP: Not found');
-    results.push({ name: 'AppleScript MCP', passed: false, details: 'Not installed' });
+    return { name: 'AppleScript MCP', passed: false, details: 'Not installed' };
   }
 }
 
 /**
  * Tests if DroidRun/ADB is working
- * @param {Array} results - Results array to append to
+ * @returns {Promise<Object>} Test result
  */
-async function testDroidRun(results) {
+async function testDroidRun() {
   const spinner = ora('Testing DroidRun/ADB...').start();
   try {
     const output = execSync('adb devices', {
@@ -159,14 +167,14 @@ async function testDroidRun(results) {
 
     if (lines.length > 0) {
       spinner.succeed('DroidRun/ADB: Working');
-      results.push({ name: 'DroidRun/ADB', passed: true, details: `${lines.length} device(s) connected` });
+      return { name: 'DroidRun/ADB', passed: true, details: `${lines.length} device(s) connected` };
     } else {
       spinner.warn('DroidRun/ADB: No devices connected');
-      results.push({ name: 'DroidRun/ADB', passed: false, details: 'No devices found' });
+      return { name: 'DroidRun/ADB', passed: false, details: 'No devices found' };
     }
-  } catch (error) {
+  } catch {
     spinner.fail('DroidRun/ADB: Not accessible');
-    results.push({ name: 'DroidRun/ADB', passed: false, details: 'ADB not found' });
+    return { name: 'DroidRun/ADB', passed: false, details: 'ADB not found' };
   }
 }
 
@@ -180,8 +188,6 @@ function printSummary(results) {
   // Calculate column widths
   const nameWidth = Math.max(...results.map(r => r.name.length), 10);
   const statusWidth = 8;
-  const detailsWidth = 40;
-
   // Print header
   const header = `${'Component'.padEnd(nameWidth)} | ${'Status'.padEnd(statusWidth)} | Details`;
   console.log(chalk.bold(header));

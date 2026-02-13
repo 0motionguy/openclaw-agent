@@ -28,6 +28,7 @@ export class ContextEngine {
     this.facts = [];
     this.tokenCount = 0;
     this.taskComplexity = 'simple';
+    this.snapshotVersion = 0;
   }
 
   /**
@@ -48,6 +49,7 @@ export class ContextEngine {
   updateSnapshot(snapshot) {
     // Discard old snapshot completely
     this.currentSnapshot = snapshot;
+    this.snapshotVersion++;
   }
 
   /**
@@ -55,19 +57,25 @@ export class ContextEngine {
    * After extraction, snapshot can be discarded (Rule C2: extract & discard)
    * @param {any} snapshot - Snapshot to extract from
    * @param {Array<string>} factsList - List of facts extracted
+   * @param {'critical' | 'normal' | 'ephemeral'} priority - Fact priority (default: 'normal')
    */
-  extractFacts(snapshot, factsList) {
+  extractFacts(snapshot, factsList, priority = 'normal') {
     if (!Array.isArray(factsList)) {
       throw new Error('factsList must be an array of strings');
     }
 
-    // Add facts with timestamp
+    if (!['critical', 'normal', 'ephemeral'].includes(priority)) {
+      throw new Error('priority must be "critical", "normal", or "ephemeral"');
+    }
+
+    // Add facts with timestamp and priority
     const timestamp = new Date().toISOString();
     for (const fact of factsList) {
       const factEntry = {
         fact: String(fact),
         extractedAt: timestamp,
-        tokens: this._estimateTokens(String(fact))
+        tokens: this._estimateTokens(String(fact)),
+        priority: priority
       };
       this.facts.push(factEntry);
       this.tokenCount += factEntry.tokens;
@@ -96,19 +104,44 @@ export class ContextEngine {
   }
 
   /**
-   * Prune oldest facts to get under budget (Rule C4: prune when necessary)
+   * Prune facts to get under budget (Rule C4: prune when necessary)
+   * Priority-based: ephemeral first, then normal. NEVER auto-prune critical.
    * @returns {number} Number of facts pruned
    */
   prune() {
     const budget = this.budgets[this.taskComplexity];
     let pruned = 0;
 
-    // Remove oldest facts (FIFO) until we're under budget
-    while (this.tokenCount > budget && this.facts.length > 0) {
-      const removed = this.facts.shift();
-      if (removed) {
+    // First pass: remove ephemeral facts (oldest first)
+    let i = 0;
+    while (this.tokenCount > budget && i < this.facts.length) {
+      if (this.facts[i].priority === 'ephemeral') {
+        const removed = this.facts.splice(i, 1)[0];
         this.tokenCount -= removed.tokens;
         pruned++;
+      } else {
+        i++;
+      }
+    }
+
+    // Second pass: remove normal facts (oldest first)
+    i = 0;
+    while (this.tokenCount > budget && i < this.facts.length) {
+      if (this.facts[i].priority === 'normal') {
+        const removed = this.facts.splice(i, 1)[0];
+        this.tokenCount -= removed.tokens;
+        pruned++;
+      } else {
+        i++;
+      }
+    }
+
+    // Never auto-prune critical facts
+    // If still over budget, log a warning but don't prune critical facts
+    if (this.tokenCount > budget) {
+      const criticalCount = this.facts.filter(f => f.priority === 'critical').length;
+      if (criticalCount > 0) {
+        console.warn(`Warning: Context over budget but ${criticalCount} critical facts remain`);
       }
     }
 
@@ -123,6 +156,7 @@ export class ContextEngine {
     this.facts = [];
     this.tokenCount = 0;
     this.taskComplexity = 'simple';
+    this.snapshotVersion = 0;
   }
 
   /**
@@ -131,12 +165,27 @@ export class ContextEngine {
    */
   getStatus() {
     const budget = this.budgets[this.taskComplexity];
+    const percentUsed = Math.round((this.tokenCount / budget) * 100);
+
+    // Determine warning level
+    let warningLevel;
+    if (percentUsed > 100) {
+      warningLevel = 'exceeded';
+    } else if (percentUsed >= 95) {
+      warningLevel = 'critical';
+    } else if (percentUsed >= 80) {
+      warningLevel = 'warning';
+    } else {
+      warningLevel = 'ok';
+    }
+
     return {
       complexity: this.taskComplexity,
       budget: budget,
       tokensUsed: this.tokenCount,
       tokensRemaining: budget - this.tokenCount,
-      percentUsed: Math.round((this.tokenCount / budget) * 100),
+      percentUsed: percentUsed,
+      warningLevel: warningLevel,
       factCount: this.facts.length,
       hasSnapshot: this.currentSnapshot !== null,
       isOverBudget: this.isOverBudget()
@@ -144,7 +193,15 @@ export class ContextEngine {
   }
 
   /**
-   * Estimate token count for text (rough: 4 chars = 1 token)
+   * Get snapshot age (how many snapshots ago current one was set)
+   * @returns {number} Snapshot version counter
+   */
+  getSnapshotAge() {
+    return this.snapshotVersion;
+  }
+
+  /**
+   * Estimate token count for text using word-based approximation
    * @private
    * @param {string} text - Text to estimate
    * @returns {number} Estimated token count
@@ -153,8 +210,9 @@ export class ContextEngine {
     if (typeof text !== 'string') {
       text = JSON.stringify(text);
     }
-    // Rough estimation: 4 characters ≈ 1 token
-    return Math.ceil(text.length / 4);
+    // Word-based estimation: ~1.3x word count (closer to BPE tokenization)
+    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+    return Math.ceil(wordCount * 1.3);
   }
 
   /**
@@ -176,12 +234,18 @@ export class ContextEngine {
   /**
    * Manually add a single fact
    * @param {string} fact - Fact to add
+   * @param {'critical' | 'normal' | 'ephemeral'} priority - Fact priority (default: 'normal')
    */
-  addFact(fact) {
+  addFact(fact, priority = 'normal') {
+    if (!['critical', 'normal', 'ephemeral'].includes(priority)) {
+      throw new Error('priority must be "critical", "normal", or "ephemeral"');
+    }
+
     const factEntry = {
       fact: String(fact),
       extractedAt: new Date().toISOString(),
-      tokens: this._estimateTokens(String(fact))
+      tokens: this._estimateTokens(String(fact)),
+      priority: priority
     };
     this.facts.push(factEntry);
     this.tokenCount += factEntry.tokens;

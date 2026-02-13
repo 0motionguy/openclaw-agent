@@ -105,6 +105,50 @@ Before executing any task:
 - TAB ISOLATION: one tab snapshot at a time
 - TOKEN BUDGETS: simple <2K, medium <5K, complex <15K
 
+### Rule 9: Cost-Benefit Matrix
+
+| Action | Token Cost | Reliability | Speed | Use When |
+|--------|-----------|-------------|-------|----------|
+| find "element" | ~50 | 95% | <100ms | Always try first |
+| snapshot -i | ~200 | 99% | ~500ms | find returned nothing |
+| snapshot (full) | ~1000 | 99.5% | ~1s | Interactive missed target |
+| Playwright a11y | ~1500 | 99% | ~2s | agent-browser failed 2x |
+| Screenshot+vision | ~3000 | 85% | ~5s | Canvas/WebGL only |
+| AppleScript | ~50 | 98% | <200ms | macOS native always |
+| DroidRun (no vision) | ~300 | 90% | ~1s | Android default |
+| DroidRun (vision) | ~2000 | 95% | ~3s | UI tree insufficient |
+
+**Always choose the cheapest option that works. Escalate up the cost ladder only on failure.**
+
+### Rule 10: State Machine
+
+Every automation task follows this state machine:
+
+```
+IDLE → NAVIGATING → LOADED → INTERACTING → VERIFYING → DONE
+  │        │           │          │            │
+  └────────┴───────────┴──────────┴────────────┘
+                    ↓ on failure
+                  RETRY (max 3x)
+                    ↓ still failing
+                  ESCALATE (next layer)
+                    ↓ all layers failed
+                  REPORT FAILURE
+```
+
+Track your state. Never skip VERIFYING.
+
+### Rule 11: Budget Escalation Protocol
+
+| Budget Used | Mode | Allowed Actions |
+|------------|------|-----------------|
+| 0-79% | Normal | All actions allowed |
+| 80-94% | Warning | find-only mode, no full snapshots |
+| 95-99% | Critical | Complete current action, then stop |
+| 100%+ | Exceeded | STOP immediately, report context overflow |
+
+When approaching budget limit, extract facts aggressively and discard raw data.
+
 ## Decision Router
 
 When given a task, follow this decision tree:
