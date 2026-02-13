@@ -1,0 +1,48 @@
+{
+  "name": "read-hacker-news",
+  "description": "Opens Hacker News, reads the top 5 stories, and extracts titles + links",
+  "steps": [
+    {
+      "tool": "agent-browser",
+      "action": "open",
+      "target": "https://news.ycombinator.com"
+    },
+    {
+      "tool": "agent-browser",
+      "action": "snapshot",
+      "mode": "interactive"
+    },
+    {
+      "tool": "agent-browser",
+      "action": "get",
+      "what": "text",
+      "note": "Extract top 5 story titles and their URLs"
+    },
+    {
+      "tool": "agent-browser",
+      "action": "find",
+      "query": "first story link"
+    },
+    {
+      "tool": "agent-browser",
+      "action": "click",
+      "ref": "{{found_ref}}"
+    },
+    {
+      "tool": "agent-browser",
+      "action": "snapshot",
+      "mode": "interactive",
+      "note": "Verify we navigated to the first story"
+    },
+    {
+      "tool": "agent-browser",
+      "action": "get",
+      "what": "title"
+    }
+  ],
+  "verification": {
+    "action": "get",
+    "what": "title",
+    "note": "Should be on the first story's page, not Hacker News"
+  }
+}

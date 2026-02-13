@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "platform": "auto-detect",
+  "layers": {
+    "browser": {
+      "enabled": true,
+      "primary": "agent-browser",
+      "fallback": "playwright",
+      "description": "DOM-based browser control via accessibility snapshots and @refs"
+    },
+    "desktop": {
+      "enabled": false,
+      "tool": "auto",
+      "description": "Native desktop app control (AppleScript on macOS, PowerShell on Windows)"
+    },
+    "android": {
+      "enabled": false,
+      "tool": "droidrun",
+      "description": "Android device automation via accessibility tree + ADB"
+    }
+  },
+  "ollama": {
+    "endpoint": "http://localhost:11434",
+    "primaryModel": "qwen2.5:7b",
+    "lightweightModel": "qwen2.5:3b",
+    "visionModel": "llava:7b",
+    "models": []
+  },
+  "contextRules": {
+    "maxTokensSimple": 2000,
+    "maxTokensMedium": 5000,
+    "maxTokensComplex": 15000,
+    "discardOldSnapshots": true,
+    "interactiveOnly": true,
+    "findBeforeSnapshot": true,
+    "compressScreenshots": true
+  }
+}

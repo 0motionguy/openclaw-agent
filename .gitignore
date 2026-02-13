@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+/openclaw.config.json
+dist/
+coverage/
+.idea/
+.vscode/
+*.tgz

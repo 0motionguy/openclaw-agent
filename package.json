@@ -1,0 +1,35 @@
+{
+  "name": "openclaw-agent",
+  "version": "1.0.0",
+  "description": "Interactive installer for OpenClaw agent automation tools — browser, desktop, and Android control via DOM/accessibility trees",
+  "main": "bin/cli.js",
+  "bin": {
+    "openclaw-setup": "./bin/cli.js"
+  },
+  "scripts": {
+    "setup": "node bin/cli.js",
+    "verify": "node bin/cli.js --verify",
+    "configure": "node bin/cli.js --configure"
+  },
+  "keywords": [
+    "ai-agent",
+    "browser-automation",
+    "mcp",
+    "ollama",
+    "playwright",
+    "accessibility",
+    "dom-automation",
+    "openclaw"
+  ],
+  "author": "0motionguy",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "inquirer": "^9.2.12",
+    "ora": "^7.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "type": "module"
+}
