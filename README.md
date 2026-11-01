@@ -1,121 +1,69 @@
 # OpenClaw Agent
 
-Universal AI agent automation installer. Sets up browser, desktop, and Android control using DOM & accessibility trees — not screenshots.
+An interactive installer and reference toolkit for AI agents that drive browsers, desktops and Android devices through DOM and accessibility trees instead of screenshots.
+
+It sets up the tool servers an agent needs (browser automation, macOS AppleScript, Android through DroidRun, Windows PowerShell helpers), an optional local model runtime (Ollama) and the MCP configuration for Claude Desktop and Claude Code. Next to the installer sit small reference modules for context budgeting, task routing and JSON workflows, plus the system prompt and context rules that go with them. It is for developers wiring up their own agent who want a working starting point and a documented set of rules for keeping agent context small.
+
+## What it does
+
+- **Platform detection** (`src/detect-platform.js`): OS, architecture, Node, Python and pip, ADB and Ollama are probed in parallel.
+- **Layered install** (`src/install-tools.js`): browser (an agent-browser CLI plus Playwright Chromium), macOS (AppleScript MCP), Android (DroidRun through pip) and Windows (built-in PowerShell). Tools that are already present are skipped, and pip and model pulls use argument arrays rather than shell strings.
+- **Local models** (`src/install-ollama.js`): installs Ollama (Homebrew, the install script, or a download link) and pulls the models you pick. The shipped config names a 7B and a 3B Qwen model and a LLaVA vision model.
+- **MCP configuration** (`src/configure-mcp.js`): merges server entries into the Claude Desktop config on macOS and Windows without overwriting existing ones, using an atomic write, and prints the `claude mcp add` commands for Claude Code.
+- **Verify and reconfigure:** `--verify` runs the checks in parallel, `--configure` repeats the MCP step, and a run writes `openclaw.config.json` to the current directory.
+- **ContextEngine** (`agent/context-engine.js`): token budgets per task complexity (2,000, 5,000 and 15,000 by default) with priority-based pruning of stored facts.
+- **DecisionRouter** (`agent/decision-router.js`): maps a task description to an API, browser, macOS, Android, Windows or file layer by keyword patterns, with confidence scores, ranked alternatives and an LRU cache.
+- **WorkflowRunner** (`agent/workflow-runner.js`): runs JSON workflows (`workflows/example-hacker-news.json`) with `{{variable}}` templates, parallel step groups, retry with backoff and per-step timing.
+- **Prompts and guide:** `prompts/system-prompt.md`, context rules C1 to C7 in `prompts/context-rules.md`, and a 2,000-line reference guide in `docs/FULL-GUIDE.md`.
+
+## How it's built
 
 ```
-npx openclaw-agent
+bin/cli.js (inquirer prompts)
+   |-- src/detect-platform  -> OS, Node, Python, ADB, Ollama
+   |-- src/install-tools    -> agent-browser, Playwright, AppleScript MCP, DroidRun
+   |-- src/install-ollama   -> Ollama + models
+   |-- src/configure-mcp    -> Claude Desktop config / Claude Code commands
+   `-- src/configure-openclaw, src/verify
+
+agent/ (reference code, independent of the installer)
+   context-engine  <-  workflow-runner      decision-router
 ```
 
-## What It Does
+Node 18+, ES modules, `chalk`, `inquirer` and `ora` for the CLI. Tests run on vitest, lint on ESLint 9. The browser, AppleScript and DroidRun tools are third-party and are installed, not bundled.
 
-- **Installs MCP tool servers** that any AI agent (Claude, OpenClaw, ChatGPT, etc.) can use
-- **Configures Ollama** for free, private, local AI models
-- **Sets up Claude Desktop/Code** MCP configuration automatically
+## Repository layout
 
-## Architecture
+- `bin/`: the interactive CLI.
+- `src/`: installer modules, each with input validation (`validate.js`).
+- `agent/`: ContextEngine, DecisionRouter and WorkflowRunner.
+- `config/`: MCP config templates for Claude Desktop (macOS, Windows), a Claude Code setup script and a sample `openclaw.config.json`.
+- `prompts/`: system prompt and context rules to paste into an agent.
+- `workflows/`: an example workflow.
+- `docs/`: the full guide.
+- `test/`: 48 test cases in four files.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Your AI Agent Brain                    │
-│         Claude / OpenClaw / GPT / Ollama (local)         │
-└────────┬────────────┬──────────────┬──────────┬─────────┘
-         │            │              │          │
-    MCP/stdio    MCP/stdio      MCP/stdio   Python API
-         │            │              │          │
-  ┌──────▼──────┐ ┌───▼────────┐ ┌──▼────────┐ ┌▼──────────┐
-  │   agent-    │ │ Playwright │ │ AppleScript│ │  DroidRun │
-  │   browser   │ │    MCP     │ │    MCP     │ │  + Portal │
-  └──────┬──────┘ └───┬────────┘ └──┬────────┘ └┬──────────┘
-         │            │              │           │
-    Chromium      Chromium       macOS apps   Android
-    via CDP       via Playw.     via AS       via ADB
-```
-
-## Platform Support
-
-| Capability | macOS | Windows | Linux | Android |
-|-----------|-------|---------|-------|---------|
-| Browse websites | Yes | Yes | Yes | Yes |
-| Fill web forms | Yes | Yes | Yes | Yes |
-| Control native apps | Yes (AppleScript) | Partial (PowerShell) | No | Yes (DroidRun) |
-| Local AI (Ollama) | Yes | Yes | Yes | Via network |
-
-## Quick Start (macOS — recommended)
+## Run it locally
 
 ```bash
-# 1. Run installer — selects Browser + AppleScript by default on Mac
-npx openclaw-agent
-
-# 2. Grant AppleScript automation permission when prompted:
-#    System Settings → Privacy & Security → Automation → enable for Claude/Terminal
-
-# 3. Restart Claude Desktop, then ask:
-#    "Open example.com and read the headline"
+git clone https://github.com/0motionguy/openclaw-agent.git
+cd openclaw-agent
+npm install
+npm run setup        # interactive installer
+npm run verify       # check what is installed
+npm run configure    # redo the MCP step
+npm test             # vitest
+npm run lint
 ```
 
-## Other Environments
+Needs Node 18+. Linux without a display needs Xvfb for the browser layer.
 
-| Environment | Layers | Notes |
-|------------|--------|-------|
-| **macOS** (primary) | Browser + AppleScript + Android | Full support, recommended |
-| **Linux VPS** | Browser only | Headless needs `xvfb-run` for Playwright |
-| **Android device** | DroidRun via Mac/Linux host | USB debugging + ADB required |
-| **Windows** | Browser + PowerShell | PowerShell helpers built-in |
+## Status
 
-```bash
-# Verify existing setup
-npx openclaw-agent --verify
+Prototype. Last push 2026-02-13, three commits. Known issues:
 
-# Re-configure MCP targets
-npx openclaw-agent --configure
-```
+- The browser layer and the config templates name `@anthropic-ai/agent-browser` and `@anthropic-ai/playwright-mcp`. Neither is published on npm; the registry has `agent-browser` and `@playwright/mcp`. Fix the names in `src/install-tools.js`, `src/configure-mcp.js` and `config/` before relying on that layer.
+- The CLI passes `desktop` and `code` as the MCP target, while `src/configure-mcp.js` tests for `claude-desktop` and `claude-code`, so only the `both` choice currently writes anything.
+- The `openclaw-agent` name on npm belongs to another project. Run from a clone, not with `npx`.
 
-## What Gets Installed
-
-| Tool | Purpose | Size |
-|------|---------|------|
-| agent-browser | Primary browser automation via DOM refs | ~50MB |
-| Playwright + Chromium | Fallback browser automation | ~200MB |
-| AppleScript MCP | macOS native app control | ~5MB |
-| DroidRun | Android device automation | ~50MB |
-| Ollama + qwen2.5:7b | Local AI model (free, private) | ~4.5GB |
-
-## Cost
-
-**$0** with Ollama local models. No API keys needed for basic automation.
-
-Optional cloud fallback (Claude, GPT) for complex tasks — uses your own API keys.
-
-## How It Works
-
-Instead of taking screenshots and guessing pixel coordinates (slow, expensive, ~60% accuracy), OpenClaw reads the DOM/accessibility tree:
-
-```
-SCREENSHOT (Bad):  Image → Vision model → "Button at x:342 y:187" → Miss
-DOM/A11Y (Good):   Snapshot → @e1 "Login" @e2 "Search" → click @e1 → 100% hit
-```
-
-This is the same approach used by Claude in Chrome, ChatGPT Atlas, and Perplexity Comet.
-
-## Project Structure
-
-```
-openclaw-agent/
-├── bin/cli.js              # Interactive installer
-├── src/                    # Installer modules
-├── agent/                  # Reference implementation (context engine, router, workflows)
-├── config/                 # MCP config templates
-├── prompts/                # Agent system prompts (paste into your agent)
-├── workflows/              # Example workflow JSON files
-└── docs/FULL-GUIDE.md      # Complete reference guide
-```
-
-## Documentation
-
-- [Full Guide](docs/FULL-GUIDE.md) — Complete reference with all layers, rules, and configuration
-- [System Prompt](prompts/system-prompt.md) — Agent behavior rules (paste into your agent)
-- [Context Rules](prompts/context-rules.md) — Context engineering rules (prevents context explosion)
-
-## License
-
-MIT
+Licence: MIT, see `LICENSE`.
